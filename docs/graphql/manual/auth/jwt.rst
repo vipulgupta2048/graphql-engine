@@ -1,6 +1,11 @@
 Authorization using JWT
 =======================
 
+.. contents:: Table of contents
+  :backlinks: none
+  :depth: 1
+  :local:
+
 You can configure JWT authorization mode (see :doc:`GraphQL server options
 <../deployment/graphql-engine-flags/reference>`) to authorize all incoming
 requests to Hasura GraphQL engine server.
@@ -12,10 +17,11 @@ verified by GraphQL engine to authorize and get metadata about the request
 
 .. image:: ../../../img/graphql/manual/auth/jwt-auth.png
 
-The JWT is decoded, the signature is verified and then it is asserted that the
-current role of the user is in the list of allowed roles. If the authorization
-passes, then all of the ``x-hasura-*`` values in the claim is used for the
-permissions system.
+The JWT is decoded, the signature is verified, then it is asserted that the
+current role of the user (if specified in the request) is in the list of allowed roles.
+If current role is not specified in the request, then the default role is picked.
+If the authorization passes, then all of the ``x-hasura-*`` values in the claim
+is used for the permissions system.
 
 .. note::
    Configuring JWT requires Hasura to run with an access key (``--access-key``).
@@ -74,7 +80,7 @@ Example JWT claim:
 
 This contains standard (``sub``, ``iat`` etc.) and custom (``name``, ``admin``
 etc.) JWT claims, as well as Hasura specific claims inside a custom namespace
-(or key) i.e ``https://hasura.io/jwt/claims``.
+(or key) i.e. ``https://hasura.io/jwt/claims``.
 
 The ``https://hasura.io/jwt/claims`` is the custom namespace where all Hasura
 specific claims have to be present. This value can be configured in the JWT
@@ -132,7 +138,7 @@ public keys are not yet supported.
 
 ``key``
 ^^^^^^^
-- In case of symmetric key (i.e HMAC based key), the key as it is. (e.g -
+- In case of symmetric key (i.e. HMAC based key), the key as it is. (e.g. -
   "abcdef...").
 - In case of asymmetric keys (RSA etc.), only the public key, in a PEM encoded
   string or as a X509 certificate.
@@ -151,7 +157,7 @@ encoded public key) as string as well - under the ``key`` field.
 
 **Rotating JWKs**:
 
-Some provider rotates their JWKs (like Firebase). If the provider sends an
+Some providers rotate their JWKs (E.g - Firebase). If the provider sends an
 ``Expires`` header with the response of JWK, then graphql-engine will refresh
 the JWKs automatically. If the provider does not send ``Expires`` header, the
 JWKs are not refreshed.
@@ -166,7 +172,7 @@ JWKs are not refreshed.
 ``claims_namespace``
 ^^^^^^^^^^^^^^^^^^^^
 This is an optional field. You can specify the key name
-inside which the Hasura specific claims will be present. E.g - ``https://mydomain.com/claims``.
+inside which the Hasura specific claims will be present. E.g. - ``https://mydomain.com/claims``.
 
 **Default value** is: ``https://hasura.io/jwt/claims``.
 
@@ -174,9 +180,9 @@ Examples
 ^^^^^^^^
 
 HMAC-SHA based
-+++++++++++++++
+++++++++++++++
 Your auth server is using HMAC-SHA algorithms to sign JWTs, and is using a
-256-bit key. Then the JWT config will look like:
+256-bit key. In this case, the JWT config will look like:
 
 .. code-block:: json
 
@@ -185,11 +191,11 @@ Your auth server is using HMAC-SHA algorithms to sign JWTs, and is using a
      "key": "3EK6FD+o0+c7tzBNVfjpMkNDi2yARAAKzQlk8O2IKoxQu4nF7EdAh8s3TwpHwrdWT6R"
    }
 
-The ``key`` is the actual shared secret. Which is used by your auth server as well.
+The ``key`` is the actual shared secret, which is used by Hasura and the external auth server.
 
 RSA based
 +++++++++
-If your auth server is using RSA to sign JWTs, and is using a 512-bit key. Then,
+If your auth server is using RSA to sign JWTs, and is using a 512-bit key. In this case,
 the JWT config needs to have the only the public key.
 
 **Example 1**: public key in PEM format (not OpenSSH format):
@@ -247,12 +253,12 @@ Using env vars:
       serve
 
 
-Well known providers and known issues
--------------------------------------
+Popular providers and known issues
+----------------------------------
 
 Firebase
 ^^^^^^^^
-This page of Firebase `docs <https://firebase.google.com/docs/auth/admin/verify-id-tokens#verify_id_tokens_using_a_third-party_jwt_library>`_
+This page of Firebase `docs <https://firebase.google.com/docs/auth/admin/verify-id-tokens#verify_id_tokens_using_a_third-party_jwt_library>`__
 mentions that JWKs are published under:
 
 https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com .
@@ -276,12 +282,16 @@ If you are using Firebase and Hasura, use this config:
 
 Auth0
 ^^^^^
+
+Refer the :doc:`Auth0 JWT Integration guide <../guides/integrations/auth0-jwt>` for a full integration guide
+with Auth0
+
 Auth0 publishes their JWK under:
 
 ``https://<your-auth0-domain>.auth0.com/.well-known/jwks.json``
 
 But they have a `bug where the certificate thumbprint does not match
-<https://community.auth0.com/t/certificate-thumbprint-is-longer-than-20-bytes/7794/3>`_.
+<https://community.auth0.com/t/certificate-thumbprint-is-longer-than-20-bytes/7794/3>`__.
 Hence, currently this URL does not work with Hasura.
 
 Current workaround is - download the X590 certificate from:
@@ -315,3 +325,13 @@ And use it in the ``key`` field:
     -----END CERTIFICATE-----
     "
         }
+
+Generate JWT Config
+^^^^^^^^^^^^^^^^^^^
+The JWT Config to be used in env ``HASURA_GRAPHQL_JWT_SECRET`` or ``--jwt-secret`` flag can be generated using
+the following UI https://hasura.io/jwt-config.
+
+Currently the UI supports generating config for Auth0 and Firebase. The config generated from this page can be
+directly pasted in yaml files and command line arguments as it takes care of escaping new lines.
+
+.. image:: ../../../img/graphql/manual/auth/jwt-config-generated.png

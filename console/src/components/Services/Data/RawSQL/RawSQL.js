@@ -5,7 +5,6 @@ import AceEditor from 'react-ace';
 import 'brace/mode/sql';
 import Modal from 'react-bootstrap/lib/Modal';
 import Button from 'react-bootstrap/lib/Button';
-import { Link } from 'react-router';
 
 import OverlayTrigger from 'react-bootstrap/lib/OverlayTrigger';
 import Tooltip from 'react-bootstrap/lib/Tooltip';
@@ -31,6 +30,12 @@ const migrationTip = (
     migrations
   </Tooltip>
 );
+const migrationNameTip = (
+  <Tooltip id="tooltip-migration">
+    Use this to change the name of the generated migration files. Defaults to
+    'run_sql_migration'
+  </Tooltip>
+);
 const trackTableTip = (
   <Tooltip id="tooltip-tracktable">
     If you are creating a table/view, you can track them to query them with
@@ -52,7 +57,6 @@ const RawSQL = ({
   isMigrationChecked,
   isTableTrackChecked,
   migrationMode,
-  currentSchema,
 }) => {
   const styles = require('../TableCommon/Table.scss');
 
@@ -89,6 +93,11 @@ const RawSQL = ({
     if (migrationMode) {
       const checkboxElem = document.getElementById('migration-checkbox');
       const isMigration = checkboxElem ? checkboxElem.checked : false;
+      const textboxElem = document.getElementById('migration-name');
+      let migrationName = textboxElem ? textboxElem.value : '';
+      if (migrationName.length === 0) {
+        migrationName = 'run_sql_migration';
+      }
       if (!isMigration && globals.consoleMode === 'cli') {
         // if migration is not checked, check if the sql text has any of 'create', 'alter', 'drop'
         const formattedSql = sql.toLowerCase();
@@ -101,16 +110,16 @@ const RawSQL = ({
           dispatch(modalOpen());
           const confirmation = false;
           if (confirmation) {
-            dispatch(executeSQL(isMigration));
+            dispatch(executeSQL(isMigration, migrationName));
           }
         } else {
-          dispatch(executeSQL(isMigration));
+          dispatch(executeSQL(isMigration, migrationName));
         }
       } else {
-        dispatch(executeSQL(isMigration));
+        dispatch(executeSQL(isMigration, migrationName));
       }
     } else {
-      dispatch(executeSQL(false));
+      dispatch(executeSQL(false, ''));
     }
   };
 
@@ -185,20 +194,13 @@ const RawSQL = ({
               </li>
               <li>
                 If you plan to create a Table/View using Raw SQL, remember to
-                link it to Hasura DB using&nbsp;
-                <Link
-                  to={
-                    '/data/schema/' + currentSchema + '/existing-table-view/add'
-                  }
-                >
-                  Add Existing Table View
-                </Link>{' '}
-                functionality.
+                link it to Hasura DB by checking the <code>Track table</code>{' '}
+                checkbox below.
               </li>
               <li>
-                Please note that if the migrations are enabled,
-                <code>down</code>
-                migrations will not be generated for SQL statements.
+                Please note that if the migrations are enabled,{' '}
+                <code>down</code> migrations will not be generated when you
+                change the schema using Raw SQL.
               </li>
             </ul>
           </div>
@@ -237,10 +239,9 @@ const RawSQL = ({
                 dispatch({ type: SET_MIGRATION_CHECKED, data: false });
               }
               // set track table checkbox true
-              if (
-                formattedSql.indexOf('create view') !== -1 ||
-                formattedSql.indexOf('create table') !== -1
-              ) {
+              const regExp = /create\s*(?:|or\s*replace)\s*(?:view|table)/; // eslint-disable-line
+              const matches = formattedSql.match(new RegExp(regExp, 'gmi'));
+              if (matches) {
                 dispatch({ type: SET_TRACK_TABLE_CHECKED, data: true });
               } else {
                 dispatch({ type: SET_TRACK_TABLE_CHECKED, data: false });
@@ -313,6 +314,28 @@ const RawSQL = ({
                   aria-hidden="true"
                 />
               </OverlayTrigger>
+              <div className={styles.padd_top}>
+                Migration Name:
+                <OverlayTrigger placement="right" overlay={migrationNameTip}>
+                  <i
+                    className={`${styles.padd_small_left} fa fa-info-circle`}
+                    aria-hidden="true"
+                  />
+                </OverlayTrigger>
+              </div>
+              <input
+                className={
+                  styles.add_mar_right_small +
+                  ' ' +
+                  styles.tableNameInput +
+                  ' ' +
+                  styles.add_mar_top_small +
+                  ' form-control'
+                }
+                placeholder={'Name of the generated migration file'}
+                id="migration-name"
+                type="text"
+              />
               <hr />
             </div>
           ) : (

@@ -7,6 +7,7 @@ import 'brace/mode/json';
 import 'react-table/react-table.css';
 import { deleteItem, vExpandRow, vCollapseRow } from './ViewActions'; // eslint-disable-line no-unused-vars
 import FilterQuery from './FilterQuery';
+import parseRowData from '../StreamingLogs/util';
 import {
   setOrderCol,
   setOrderType,
@@ -17,8 +18,9 @@ import {
   addOrder,
 } from './FilterActions';
 import { ordinalColSort } from '../utils';
-import Spinner from '../../../Common/Spinner/Spinner';
 import '../TableCommon/ReactTableFix.css';
+import * as tooltip from '../Common/Tooltips';
+import OverlayTrigger from 'react-bootstrap/lib/OverlayTrigger';
 
 const ViewRows = ({
   curTriggerName,
@@ -30,7 +32,6 @@ const ViewRows = ({
   activePath,
   triggerList,
   dispatch,
-  isProgressing,
   isView,
   count,
   expandedRow,
@@ -271,6 +272,8 @@ const ViewRows = ({
           const currentIndex = row.index;
           const currentRow = curRows[0].events[currentIndex];
           const invocationRowsData = [];
+          const requestData = [];
+          const responseData = [];
           currentRow.logs.map((r, rowIndex) => {
             const newRow = {};
             const status =
@@ -280,6 +283,8 @@ const ViewRows = ({
                 <i className={styles.invocationFailure + ' fa fa-times'} />
               );
 
+            requestData.push(parseRowData(r, 'request'));
+            responseData.push(parseRowData(r, 'response'));
             // Insert cells corresponding to all rows
             invocationColumns.forEach(col => {
               const getCellContent = () => {
@@ -324,20 +329,8 @@ const ViewRows = ({
                     showPagination={false}
                     SubComponent={logRow => {
                       const finalIndex = logRow.index;
-                      const finalRow = currentRow.logs[finalIndex];
-                      const currentPayload = JSON.stringify(
-                        finalRow.request,
-                        null,
-                        4
-                      );
-                      // check if response is type JSON
-                      let finalResponse = finalRow.response;
-                      try {
-                        finalResponse = JSON.parse(finalRow.response);
-                        finalResponse = JSON.stringify(finalResponse, null, 4);
-                      } catch (e) {
-                        console.error(e);
-                      }
+                      const finalRequest = requestData[finalIndex];
+                      const finalResponse = responseData[finalIndex];
                       return (
                         <div style={{ padding: '20px' }}>
                           <Tabs
@@ -346,15 +339,41 @@ const ViewRows = ({
                             id="requestResponseTab"
                           >
                             <Tab eventKey={1} title="Request">
+                              {finalRequest.headers ? (
+                                <div className={styles.add_mar_top}>
+                                  <div className={styles.subheading_text}>
+                                    Headers
+                                  </div>
+                                  <AceEditor
+                                    mode="json"
+                                    theme="github"
+                                    name="payload"
+                                    value={JSON.stringify(
+                                      finalRequest.headers,
+                                      null,
+                                      4
+                                    )}
+                                    minLines={4}
+                                    maxLines={20}
+                                    width="100%"
+                                    showPrintMargin={false}
+                                    showGutter={false}
+                                  />
+                                </div>
+                              ) : null}
                               <div className={styles.add_mar_top}>
                                 <div className={styles.subheading_text}>
-                                  Request
+                                  Payload
                                 </div>
                                 <AceEditor
                                   mode="json"
                                   theme="github"
                                   name="payload"
-                                  value={currentPayload}
+                                  value={JSON.stringify(
+                                    finalRequest.data,
+                                    null,
+                                    4
+                                  )}
                                   minLines={4}
                                   maxLines={100}
                                   width="100%"
@@ -364,15 +383,90 @@ const ViewRows = ({
                               </div>
                             </Tab>
                             <Tab eventKey={2} title="Response">
+                              {finalResponse.headers ? (
+                                <div className={styles.add_mar_top}>
+                                  <div className={styles.subheading_text}>
+                                    Headers
+                                  </div>
+                                  <AceEditor
+                                    mode="json"
+                                    theme="github"
+                                    name="response"
+                                    value={JSON.stringify(
+                                      finalResponse.headers,
+                                      null,
+                                      4
+                                    )}
+                                    minLines={4}
+                                    maxLines={20}
+                                    width="100%"
+                                    showPrintMargin={false}
+                                    showGutter={false}
+                                  />
+                                </div>
+                              ) : null}
                               <div className={styles.add_mar_top}>
-                                <div className={styles.subheading_text}>
-                                  Response
+                                <div
+                                  className={
+                                    styles.subheading_text +
+                                    ' col-md-6 ' +
+                                    styles.padd_remove
+                                  }
+                                >
+                                  {finalResponse.status_code
+                                    ? 'Payload'
+                                    : 'Error'}
+                                </div>
+                                <div
+                                  className={
+                                    styles.status_code_right +
+                                    ' col-md-6 ' +
+                                    styles.padd_remove
+                                  }
+                                >
+                                  {finalResponse.status_code
+                                    ? [
+                                      'Status Code: ',
+                                      finalResponse.status_code === 200 ? (
+                                        <i
+                                          className={
+                                            styles.invocationSuccess +
+                                              ' fa fa-check'
+                                          }
+                                        />
+                                      ) : (
+                                        <i
+                                          className={
+                                            styles.invocationFailure +
+                                              ' fa fa-times'
+                                          }
+                                        />
+                                      ),
+                                      finalResponse.status_code,
+                                      ' ',
+                                      <OverlayTrigger
+                                        placement="top"
+                                        overlay={
+                                          tooltip.statusCodeDescription
+                                        }
+                                      >
+                                        <i
+                                          className="fa fa-question-circle"
+                                          aria-hidden="true"
+                                        />
+                                      </OverlayTrigger>,
+                                    ]
+                                    : null}
                                 </div>
                                 <AceEditor
                                   mode="json"
                                   theme="github"
                                   name="response"
-                                  value={finalResponse}
+                                  value={JSON.stringify(
+                                    finalResponse.data,
+                                    null,
+                                    4
+                                  )}
                                   minLines={4}
                                   maxLines={100}
                                   width="100%"
@@ -406,12 +500,6 @@ const ViewRows = ({
       <div className="row">
         <div className="col-xs-12">
           <div className={styles.tableContainer + ' eventsTableBody'}>
-            {isProgressing ? (
-              <div>
-                {' '}
-                <Spinner />{' '}
-              </div>
-            ) : null}
             {renderTableBody()}
           </div>
           <br />

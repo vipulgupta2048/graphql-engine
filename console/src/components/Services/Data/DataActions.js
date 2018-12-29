@@ -33,6 +33,94 @@ const MAKE_REQUEST = 'ModifyTable/MAKE_REQUEST';
 const REQUEST_SUCCESS = 'ModifyTable/REQUEST_SUCCESS';
 const REQUEST_ERROR = 'ModifyTable/REQUEST_ERROR';
 
+const initQueries = {
+  schemaList: {
+    type: 'select',
+    args: {
+      table: {
+        name: 'schemata',
+        schema: 'information_schema',
+      },
+      columns: ['schema_name'],
+      order_by: [{ column: 'schema_name', type: 'asc', nulls: 'last' }],
+      where: {
+        schema_name: {
+          $nin: [
+            'information_schema',
+            'pg_catalog',
+            'hdb_catalog',
+            'hdb_views',
+          ],
+        },
+      },
+    },
+  },
+  loadSchema: {
+    type: 'select',
+    args: {
+      table: {
+        name: 'hdb_table',
+        schema: 'hdb_catalog',
+      },
+      columns: [
+        '*.*',
+        {
+          name: 'columns',
+          columns: ['*.*'],
+          order_by: [{ column: 'column_name', type: 'asc', nulls: 'last' }],
+        },
+      ],
+      where: { table_schema: '' },
+      order_by: [{ column: 'table_name', type: 'asc', nulls: 'last' }],
+    },
+  },
+  loadUntrackedSchema: {
+    type: 'select',
+    args: {
+      table: {
+        name: 'tables',
+        schema: 'information_schema',
+      },
+      columns: ['table_name'],
+      where: {
+        table_schema: '',
+      },
+    },
+  },
+};
+
+const fetchDataInit = () => (dispatch, getState) => {
+  const url = Endpoints.getSchema;
+  const body = {
+    type: 'bulk',
+    args: [
+      initQueries.schemaList,
+      initQueries.loadSchema,
+      initQueries.loadUntrackedSchema,
+    ],
+  };
+  // set schema in queries
+  const currentSchema = getState().tables.currentSchema;
+  body.args[1].args.where.table_schema = currentSchema;
+  body.args[2].args.where.table_schema = currentSchema;
+  const options = {
+    credentials: globalCookiePolicy,
+    method: 'POST',
+    headers: dataHeaders(getState),
+    body: JSON.stringify(body),
+  };
+  return dispatch(requestAction(url, options)).then(
+    data => {
+      dispatch({ type: FETCH_SCHEMA_LIST, schemaList: data[0] });
+      dispatch({ type: LOAD_SCHEMA, allSchemas: data[1] });
+      dispatch({ type: LOAD_UNTRACKED_SCHEMA, untrackedSchemas: data[2] });
+    },
+    error => {
+      console.error('Failed to fetch schema ' + JSON.stringify(error));
+    }
+  );
+};
+
 /* ************ action creators *********************** */
 const fetchSchemaList = () => (dispatch, getState) => {
   const url = Endpoints.getSchema;
@@ -40,27 +128,7 @@ const fetchSchemaList = () => (dispatch, getState) => {
     credentials: globalCookiePolicy,
     method: 'POST',
     headers: dataHeaders(getState),
-    body: JSON.stringify({
-      type: 'select',
-      args: {
-        table: {
-          name: 'schemata',
-          schema: 'information_schema',
-        },
-        columns: ['schema_name'],
-        order_by: [{ column: 'schema_name', type: 'asc', nulls: 'last' }],
-        where: {
-          schema_name: {
-            $nin: [
-              'information_schema',
-              'pg_catalog',
-              'hdb_catalog',
-              'hdb_views',
-            ],
-          },
-        },
-      },
-    }),
+    body: JSON.stringify(initQueries.schemaList),
   };
   return dispatch(requestAction(url, options)).then(
     data => {
@@ -75,29 +143,13 @@ const fetchSchemaList = () => (dispatch, getState) => {
 const loadSchema = () => (dispatch, getState) => {
   const url = Endpoints.getSchema;
   const currentSchema = getState().tables.currentSchema;
+  const body = initQueries.loadSchema;
+  body.args.where.table_schema = currentSchema;
   const options = {
     credentials: globalCookiePolicy,
     method: 'POST',
     headers: dataHeaders(getState),
-    body: JSON.stringify({
-      type: 'select',
-      args: {
-        table: {
-          name: 'hdb_table',
-          schema: 'hdb_catalog',
-        },
-        columns: [
-          '*.*',
-          {
-            name: 'columns',
-            columns: ['*.*'],
-            order_by: [{ column: 'column_name', type: 'asc', nulls: 'last' }],
-          },
-        ],
-        where: { table_schema: currentSchema },
-        order_by: [{ column: 'table_name', type: 'asc', nulls: 'last' }],
-      },
-    }),
+    body: JSON.stringify(body),
   };
   return dispatch(requestAction(url, options)).then(
     data => {
@@ -109,9 +161,11 @@ const loadSchema = () => (dispatch, getState) => {
   );
 };
 
-const loadUntrackedSchema = () => (dispatch, getState) => {
+const fetchViewInfoFromInformationSchema = (schemaName, viewName) => (
+  dispatch,
+  getState
+) => {
   const url = Endpoints.getSchema;
-  const currentSchema = getState().tables.currentSchema;
   const options = {
     credentials: globalCookiePolicy,
     method: 'POST',
@@ -120,15 +174,36 @@ const loadUntrackedSchema = () => (dispatch, getState) => {
       type: 'select',
       args: {
         table: {
-          name: 'tables',
+          name: 'views',
           schema: 'information_schema',
         },
-        columns: ['table_name'],
+        columns: [
+          'is_updatable',
+          'is_insertable_into',
+          'is_trigger_updatable',
+          'is_trigger_deletable',
+          'is_trigger_insertable_into',
+        ],
         where: {
-          table_schema: currentSchema,
+          table_name: viewName,
+          table_schema: schemaName,
         },
       },
     }),
+  };
+  return dispatch(requestAction(url, options));
+};
+
+const loadUntrackedSchema = () => (dispatch, getState) => {
+  const url = Endpoints.getSchema;
+  const currentSchema = getState().tables.currentSchema;
+  const body = initQueries.loadUntrackedSchema;
+  body.args.where.table_name = currentSchema;
+  const options = {
+    credentials: globalCookiePolicy,
+    method: 'POST',
+    headers: dataHeaders(getState),
+    body: JSON.stringify(body),
   };
   return dispatch(requestAction(url, options)).then(
     data => {
@@ -480,9 +555,11 @@ export {
   UPDATE_CURRENT_SCHEMA,
   loadUntrackedRelations,
   fetchSchemaList,
+  fetchDataInit,
   ACCESS_KEY_ERROR,
   UPDATE_DATA_HEADERS,
   UPDATE_REMOTE_SCHEMA_MANUAL_REL,
   fetchTableListBySchema,
   RESET_MANUAL_REL_TABLE_LIST,
+  fetchViewInfoFromInformationSchema,
 };

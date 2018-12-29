@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-
 -- This is taken from wai-logger and customised for our use
 
 module Hasura.Server.Logging
@@ -9,44 +5,44 @@ module Hasura.Server.Logging
   , getRequestHeader
   , WebHookLog(..)
   , WebHookLogger
+  , HttpException
   ) where
 
-import           Control.Arrow          (first)
-import           Crypto.Hash            (Digest, SHA1, hash)
+import           Crypto.Hash                 (Digest, SHA1, hash)
 import           Data.Aeson
-import           Data.Bits              (shift, (.&.))
-import           Data.ByteString.Char8  (ByteString)
-import qualified Data.ByteString.Lazy   as BL
-import           Data.Int               (Int64)
-import           Data.List              (find)
-import qualified Data.TByteString       as TBS
-import qualified Data.Text              as T
-import qualified Data.Text.Encoding     as TE
+import           Data.Bits                   (shift, (.&.))
+import           Data.ByteString.Char8       (ByteString)
+import qualified Data.ByteString.Lazy        as BL
+import           Data.Int                    (Int64)
+import           Data.List                   (find)
+import qualified Data.TByteString            as TBS
+import qualified Data.Text                   as T
+import qualified Data.Text.Encoding          as TE
 import           Data.Time.Clock
-import           Data.Word              (Word32)
-import           Network.Socket         (SockAddr (..))
-import           Network.Wai            (Request (..))
-import           System.ByteOrder       (ByteOrder (..), byteOrder)
-import           Text.Printf            (printf)
+import           Data.Word                   (Word32)
+import           Network.Socket              (SockAddr (..))
+import           Network.Wai                 (Request (..))
+import           System.ByteOrder            (ByteOrder (..), byteOrder)
+import           Text.Printf                 (printf)
 
-import qualified Data.ByteString.Char8  as BS
-import qualified Data.CaseInsensitive   as CI
-import qualified Data.HashMap.Strict    as M
-import qualified Network.HTTP.Client    as H
-import qualified Network.HTTP.Types     as N
+import qualified Data.ByteString.Char8       as BS
+import qualified Data.CaseInsensitive        as CI
+import qualified Network.HTTP.Types          as N
 
-import qualified Hasura.Logging         as L
+import qualified Hasura.Logging              as L
 import           Hasura.Prelude
 import           Hasura.RQL.Types.Error
+import           Hasura.RQL.Types.Permission
 import           Hasura.Server.Utils
-
+import           Hasura.HTTP
 
 data WebHookLog
   = WebHookLog
   { whlLogLevel   :: !L.LogLevel
   , whlStatusCode :: !(Maybe N.Status)
   , whlUrl        :: !T.Text
-  , whlError      :: !(Maybe H.HttpException)
+  , whlMethod     :: !N.StdMethod
+  , whlError      :: !(Maybe HttpException)
   , whlResponse   :: !(Maybe T.Text)
   } deriving (Show)
 
@@ -54,39 +50,30 @@ instance L.ToEngineLog WebHookLog where
   toEngineLog webHookLog =
     (whlLogLevel webHookLog, "webhook-log", toJSON webHookLog)
 
-instance ToJSON H.HttpException where
-  toJSON (H.InvalidUrlException _ e) =
-    object [ "type" .= ("invalid_url" :: T.Text)
-           , "message" .= e
-           ]
-  toJSON (H.HttpExceptionRequest _ cont) =
-    object [ "type" .= ("http_exception" :: T.Text)
-           , "message" .= show cont
-           ]
-
 instance ToJSON WebHookLog where
-  toJSON whl = object [ "status_code" .= (N.statusCode <$> whlStatusCode whl)
-                      , "url" .= whlUrl whl
-                      , "http_error" .= whlError whl
-                      , "response" .= whlResponse whl
-                      ]
+  toJSON whl =
+    object [ "status_code" .= (N.statusCode <$> whlStatusCode whl)
+           , "url" .= whlUrl whl
+           , "method" .= show (whlMethod whl)
+           , "http_error" .= whlError whl
+           , "response" .= whlResponse whl
+           ]
 
 type WebHookLogger = WebHookLog -> IO ()
 
 data AccessLog
   = AccessLog
-  { alStatus         :: !N.Status
-  , alMethod         :: !T.Text
-  , alSource         :: !T.Text
-  , alPath           :: !T.Text
-  , alHttpVersion    :: !N.HttpVersion
-  , alDetail         :: !(Maybe Value)
-  , alRequestId      :: !(Maybe T.Text)
-  , alHasuraRole     :: !(Maybe T.Text)
-  , alHasuraMetadata :: !(Maybe Value)
-  , alQueryHash      :: !(Maybe T.Text)
-  , alResponseSize   :: !(Maybe Int64)
-  , alResponseTime   :: !(Maybe Double)
+  { alStatus       :: !N.Status
+  , alMethod       :: !T.Text
+  , alSource       :: !T.Text
+  , alPath         :: !T.Text
+  , alHttpVersion  :: !N.HttpVersion
+  , alDetail       :: !(Maybe Value)
+  , alRequestId    :: !(Maybe T.Text)
+  , alHasuraUser   :: !(Maybe UserVars)
+  , alQueryHash    :: !(Maybe T.Text)
+  , alResponseSize :: !(Maybe Int64)
+  , alResponseTime :: !(Maybe Double)
   } deriving (Show, Eq)
 
 instance L.ToEngineLog AccessLog where
@@ -94,7 +81,7 @@ instance L.ToEngineLog AccessLog where
     (L.LevelInfo, "http-log", toJSON accessLog)
 
 instance ToJSON AccessLog where
-  toJSON (AccessLog st met src path hv det reqId hRole hMd qh rs rt) =
+  toJSON (AccessLog st met src path hv det reqId hUser qh rs rt) =
     object [ "status" .= N.statusCode st
            , "method" .= met
            , "ip" .= src
@@ -102,8 +89,7 @@ instance ToJSON AccessLog where
            , "http_version" .= show hv
            , "detail" .= det
            , "request_id" .= reqId
-           , "hasura_role" .= hRole
-           , "hasura_metadata" .= hMd
+           , "user" .= hUser
            , "query_hash" .= qh
            , "response_size" .= rs
            , "query_execution_time" .= rt
@@ -159,24 +145,24 @@ ravenLogGen (reqBody, res) =
     sha1 = hash . BL.toStrict
 
 mkAccessLog
-  :: Request
+  :: Maybe UserInfo -- may not have been resolved
+  -> Request
   -> (BL.ByteString, Either QErr BL.ByteString)
   -> Maybe (UTCTime, UTCTime)
   -> AccessLog
-mkAccessLog req r mTimeT =
+mkAccessLog userInfoM req r mTimeT =
   AccessLog
-  { alStatus      = status
-  , alMethod      = bsToTxt $ requestMethod req
-  , alSource      = bsToTxt $ getSourceFromFallback req
-  , alPath        = bsToTxt $ rawPathInfo req
-  , alHttpVersion = httpVersion req
-  , alDetail      = mDetail
-  , alRequestId   = bsToTxt <$> getRequestId req
-  , alHasuraRole  = bsToTxt <$> getHasuraRole req
-  , alHasuraMetadata = getHasuraMetadata req
+  { alStatus       = status
+  , alMethod       = bsToTxt $ requestMethod req
+  , alSource       = bsToTxt $ getSourceFromFallback req
+  , alPath         = bsToTxt $ rawPathInfo req
+  , alHttpVersion  = httpVersion req
+  , alDetail       = mDetail
+  , alRequestId    = bsToTxt <$> getRequestId req
+  , alHasuraUser   = userVars <$> userInfoM
   , alResponseSize = size
   , alResponseTime = realToFrac <$> diffTime
-  , alQueryHash = queryHash
+  , alQueryHash    = queryHash
   }
   where
     (status, mDetail, queryHash, size) = ravenLogGen r
@@ -203,36 +189,11 @@ requestIdHeader = "x-request-id"
 getRequestId :: Request -> Maybe ByteString
 getRequestId = getRequestHeader $ TE.encodeUtf8 requestIdHeader
 
-getHasuraRole :: Request -> Maybe ByteString
-getHasuraRole = getRequestHeader $ TE.encodeUtf8 userRoleHeader
-
 getRequestHeader :: ByteString -> Request -> Maybe ByteString
 getRequestHeader hdrName req = snd <$> mHeader
   where
     mHeader = find (\h -> fst h == CI.mk hdrName) hdrs
     hdrs = requestHeaders req
-
-newtype HasuraMetadata
-  = HasuraMetadata { unHM :: M.HashMap T.Text T.Text } deriving (Show)
-
-instance ToJSON HasuraMetadata where
-  toJSON h = toJSON $ M.fromList $ map (first format) hdrs
-    where
-      hdrs = M.toList $ unHM h
-      format = T.map underscorify . T.drop 2
-      underscorify '-' = '_'
-      underscorify c   = c
-
-getHasuraMetadata :: Request -> Maybe Value
-getHasuraMetadata req = case md of
-  [] -> Nothing
-  _  -> Just $ toJSON $ HasuraMetadata (M.fromList md)
-  where
-    md = filter filterFixedHeaders rawMd
-    filterFixedHeaders (h,_) = h /= userRoleHeader && h /= accessKeyHeader
-    rawMd = filter (\h -> "x-hasura-" `T.isInfixOf` fst h) hdrs
-    hdrs = map hdrToTxt $ requestHeaders req
-    hdrToTxt (k, v) = (T.toLower $ bsToTxt $ CI.original k, bsToTxt v)
 
 -- |  A type for IP address in numeric string representation.
 type NumericAddress = String

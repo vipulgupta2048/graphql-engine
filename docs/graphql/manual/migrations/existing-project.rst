@@ -1,16 +1,21 @@
 Migrations for an existing project
 ==================================
 
+.. contents:: Table of contents
+  :backlinks: none
+  :depth: 1
+  :local:
+
 This guide will help you if you already have set up a schema and now want
 to start using migrations to help you track the database and GraphQL schema changes.
 
 These are the steps you need to follow:
 
 #. Install the Hasura CLI
-#. Setup a project dir
-#. Initialise migrations
+#. Set up a project directory
+#. Initialize migrations
 #. For further changes, use the Hasura CLI console (``http://localhost:9695``) instead of the console served by the
-   GraphQL engine (Eg: ``http://my-graphql.herokuapp.com``)
+   GraphQL engine (E.g.: ``http://my-graphql.herokuapp.com``)
 
 Step 0: Take a note of your GraphQL engine endpoint
 ---------------------------------------------------
@@ -62,38 +67,44 @@ Step 1: Install the Hasura CLI
       getting a "command not found" error after installing Hasura CLI, please restart ``git bash``.
 
 
-Step 2: Setup a project directory
----------------------------------
+Step 2: Set up a project directory
+----------------------------------
 Skip this step if you already have a project directory.
 
 .. code-block:: bash
 
   hasura init --directory my-project --endpoint http://my-graphql.herokuapp.com
 
-Step 3: Initialise the migrations as per your current state
+Step 3: Initialize the migrations as per your current state
 -----------------------------------------------------------
 
-- Install ``pg_dump`` (or use docker) and run the following command to download the public schema as ``public-schema.sql``:
+- Install ``pg_dump`` (or use Docker) and run the following command to download the public schema as ``public-schema.sql``:
 
   .. code-block:: bash
   
      pg_dump -O -x -h <db-host> -p <db-port> -U <db-user> -d <db-name> --schema public --schema-only > public-schema.sql
 
-- Export the metadata (this creates a file ``metadata.yaml``)
+  .. note::
+
+     If the exported file contains ``SELECT pg_catalog.set_config('search_path', '', false);``, remove the whole line.
+     This can cause issues later when SQL is run without schema qualifiers, since this statement sets search path to ``''``
+     instead of the default ``public`` and ``pg_catalog``.
+
+- Export the metadata (this creates a file ``metadata.yaml``):
 
   .. code-block:: bash
      
      hasura metadata export
 
-- Create a new migration with a name, say ``first``. This will generate some files in ``migrations/`` directory
+- Create a new migration with a name, say ``first``. This will generate some files in ``migrations/`` directory:
 
   .. code-block:: bash
   
      hasura migrate create first
 
 - Move the contents of ``public-schema.sql`` to ``migrations/<version>_first.up.sql``
-- Move the contents of ``metadata.yaml`` to ``migrations/<version>_first.up.yaml`` with the following content:
-  (take care of indentation)
+- Move the contents of ``metadata.yaml`` to ``migrations/<version>_first.up.yaml`` with the following content
+  (take care of indentation):
 
   .. code-block:: yaml
 
@@ -101,12 +112,12 @@ Step 3: Initialise the migrations as per your current state
        args:
          <contents-of-metadata.yaml>
 
-- Remove ``migrations/<version>_first.down.{sql,yaml}`` migration files if you are not adding down migrations for these.
+- Remove ``migrations/<version>_first.down.{sql,yaml}`` migration files if you are not adding down migrations for these
 
 Step 4: Use the console from the CLI
 ------------------------------------
 
-Instead of using the console at ``http://my-grapqhl.herokuapp.com/console`` you should now use the console by running:
+Instead of using the console at ``http://my-graphql.herokuapp.com/console`` you should now use the console by running:
 
 .. code-block:: bash
 
@@ -124,17 +135,17 @@ in the ``migrations/`` directory in your project.
 
 .. note::
 
-   Migrations are only created when using the Console though CLI.
+   Migrations are only created when using the Console through CLI.
 
 Step 6: Apply the migrations to another instance of the GraphQL engine
 ----------------------------------------------------------------------
 
-- Edit ``config.yaml`` and change the endpoint to another instance, say ``https://my-another-grapqhl.herokuapp.com``
+- Edit ``config.yaml`` and change the endpoint to another instance, say ``https://my-another-graphql.herokuapp.com``:
 
   .. code-block:: yaml
 
      # config.yaml
-     endpoint: https://my-another-grapqhl.herokuapp.com
+     endpoint: https://my-another-graphql.herokuapp.com
 
 - Apply all migrations present in the ``migrations/`` directory on this new instance:
 
@@ -147,4 +158,4 @@ Step 7: Create migrations without the console & other advanced actions
 
 - Each migration consists of a pair of yaml and sql files with up and down steps.
 - Create migrations manually using :ref:`migrate create <hasura_migrate_create>`.
-- You can apply only certain versions or number of steps. Read more at :ref:`migrate apply <hasura_migrate_apply>`
+- You can apply only certain versions or numbers of steps. Read more at :ref:`migrate apply <hasura_migrate_apply>`

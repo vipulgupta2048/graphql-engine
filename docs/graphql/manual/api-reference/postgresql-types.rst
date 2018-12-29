@@ -1,6 +1,11 @@
 API Reference - Supported PostgreSQL Types
 ==========================================
 
+.. contents:: Table of contents
+  :backlinks: none
+  :depth: 1
+  :local:
+
 .. _types_table:
 
 List of PostgreSQL types supported by the Hasura GraphQL engine with their equivalent Hasura types:
@@ -119,7 +124,7 @@ E.g.
 
 Date
 ----
-GraphQL custom scalar with name **date**. Date (no time of day). Allowed values are yyyy-mm-dd
+GraphQL custom scalar with name **date**. Date (no time of day). Allowed values are yyyy-mm-dd.
 
 E.g.
 
@@ -136,8 +141,8 @@ E.g.
 
 Time with time zone
 -------------------
-Graphql custom scalar type with name **timetz**. Time of day only, with time zone. Allowed values should be of ISO8601 format.
-Eg. 17:30:15Z, 17:30:15+05:30, 17:30:15.234890+05:30
+GraphQL custom scalar type with name **timetz**. Time of day only, with time zone. Allowed values should be of ISO8601 format
+(e.g. 17:30:15Z, 17:30:15+05:30, 17:30:15.234890+05:30).
 
 E.g.
 
@@ -154,8 +159,8 @@ E.g.
 
 Timestamp with time zone
 ------------------------
-Graphql custom scalar type with name **timestamptz**. Both date and time, with time zone. Allowed values should be of ISO8601 format.
-Eg. 2016-07-20T17:30:15Z, 2016-07-20T17:30:15+05:30, 2016-07-20T17:30:15.234890+05:30
+GraphQL custom scalar type with name **timestamptz**. Both date and time, with time zone. Allowed values should be of ISO8601 format
+(e.g. 2016-07-20T17:30:15Z, 2016-07-20T17:30:15+05:30, 2016-07-20T17:30:15.234890+05:30).
 
 E.g.
 
@@ -212,7 +217,7 @@ E.g.
      }
    }
 
-variable:-
+variable:
 
 .. code-block:: json
 

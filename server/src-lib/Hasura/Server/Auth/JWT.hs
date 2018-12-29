@@ -1,9 +1,3 @@
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE TemplateHaskell       #-}
-
 module Hasura.Server.Auth.JWT
   ( processJwt
   , RawJWT
@@ -14,6 +8,7 @@ module Hasura.Server.Auth.JWT
   , jwkRefreshCtrl
   ) where
 
+import           Control.Arrow                   (first)
 import           Control.Exception               (try)
 import           Control.Lens
 import           Control.Monad                   (when)
@@ -24,14 +19,15 @@ import           Data.List                       (find)
 import           Data.Time.Clock                 (NominalDiffTime, diffUTCTime,
                                                   getCurrentTime)
 import           Data.Time.Format                (defaultTimeLocale, parseTimeM)
+import           Network.URI                     (URI)
 
+import           Hasura.HTTP
 import           Hasura.Logging                  (Logger (..))
 import           Hasura.Prelude
 import           Hasura.RQL.Types
 import           Hasura.Server.Auth.JWT.Internal (parseHmacKey, parseRsaKey)
 import           Hasura.Server.Auth.JWT.Logging
-import           Hasura.Server.Utils             (accessKeyHeader, bsToTxt,
-                                                  userRoleHeader)
+import           Hasura.Server.Utils             (bsToTxt, userRoleHeader)
 
 import qualified Control.Concurrent              as C
 import qualified Data.Aeson                      as A
@@ -45,7 +41,6 @@ import qualified Data.String.Conversions         as CS
 import qualified Data.Text                       as T
 import qualified Network.HTTP.Client             as HTTP
 import qualified Network.HTTP.Types              as HTTP
-import qualified Network.URI                     as N
 import qualified Network.Wreq                    as Wreq
 
 
@@ -54,7 +49,7 @@ newtype RawJWT = RawJWT BL.ByteString
 data JWTConfig
   = JWTConfig
   { jcType     :: !T.Text
-  , jcKeyOrUrl :: !(Either JWK N.URI)
+  , jcKeyOrUrl :: !(Either JWK URI)
   , jcClaimNs  :: !(Maybe T.Text)
   , jcAudience :: !(Maybe T.Text)
   -- , jcIssuer   :: !(Maybe T.Text)
@@ -65,10 +60,11 @@ data JWTCtx
   { jcxKey      :: !(IORef JWKSet)
   , jcxClaimNs  :: !(Maybe T.Text)
   , jcxAudience :: !(Maybe T.Text)
-  } deriving (Show, Eq)
+  } deriving (Eq)
 
-instance Show (IORef JWKSet) where
-  show _ = "<IORef JWKRef>"
+instance Show JWTCtx where
+  show (JWTCtx _ nsM audM) =
+    show ["<IORef JWKSet>", show nsM, show audM]
 
 data HasuraClaims
   = HasuraClaims
@@ -91,7 +87,7 @@ jwkRefreshCtrl
   :: (MonadIO m)
   => Logger
   -> HTTP.Manager
-  -> N.URI
+  -> URI
   -> IORef JWKSet
   -> NominalDiffTime
   -> m ()
@@ -113,14 +109,11 @@ updateJwkRef
      , MonadError T.Text m)
   => Logger
   -> HTTP.Manager
-  -> N.URI
+  -> URI
   -> IORef JWKSet
   -> m (Maybe NominalDiffTime)
 updateJwkRef (Logger logger) manager url jwkRef = do
-  let options = Wreq.defaults
-              & Wreq.checkResponse ?~ (\_ _ -> return ())
-              & Wreq.manager .~ Right manager
-
+  let options = wreqOptions manager []
   res  <- liftIO $ try $ Wreq.getWith options $ show url
   resp <- either logAndThrowHttp return res
   let status = resp ^. Wreq.responseStatus
@@ -151,7 +144,8 @@ updateJwkRef (Logger logger) manager url jwkRef = do
 
     logAndThrowHttp :: (MonadIO m, MonadError T.Text m) => HTTP.HttpException -> m a
     logAndThrowHttp err = do
-      let httpErr = JwkRefreshHttpError Nothing (T.pack $ show url) (Just err) Nothing
+      let httpErr = JwkRefreshHttpError Nothing (T.pack $ show url)
+                    (Just $ HttpException err) Nothing
           errMsg = "error fetching JWK: " <> T.pack (show err)
       logAndThrow errMsg (Just httpErr)
 
@@ -164,8 +158,30 @@ processJwt
      , MonadError QErr m)
   => JWTCtx
   -> HTTP.RequestHeaders
+  -> Maybe RoleName
   -> m UserInfo
-processJwt jwtCtx headers = do
+processJwt jwtCtx headers mUnAuthRole =
+  maybe withoutAuthZHeader withAuthZHeader mAuthZHeader
+  where
+    mAuthZHeader = find (\h -> fst h == CI.mk "Authorization") headers
+
+    withAuthZHeader (_, authzHeader) =
+      processAuthZHeader jwtCtx headers $ BL.fromStrict authzHeader
+
+    withoutAuthZHeader = do
+      unAuthRole <- maybe missingAuthzHeader return mUnAuthRole
+      return $ mkUserInfo unAuthRole $ mkUserVars []
+    missingAuthzHeader =
+      throw400 InvalidHeaders "Missing Authorization header in JWT authentication mode"
+
+processAuthZHeader
+  :: ( MonadIO m
+     , MonadError QErr m)
+  => JWTCtx
+  -> HTTP.RequestHeaders
+  -> BLC.ByteString
+  -> m UserInfo
+processAuthZHeader jwtCtx headers authzHeader = do
   -- try to parse JWT token from Authorization header
   jwt <- parseAuthzHeader
 
@@ -182,7 +198,7 @@ processJwt jwtCtx headers = do
 
   -- filter only x-hasura claims and convert to lower-case
   let claimsMap = Map.filterWithKey (\k _ -> T.isPrefixOf "x-hasura-" k)
-                $ Map.fromList $ map (\(k, v) -> (T.toLower k, v))
+                $ Map.fromList $ map (first T.toLower)
                 $ Map.toList hasuraClaims
 
   HasuraClaims allowedRoles defaultRole <- parseHasuraClaims claimsMap
@@ -195,17 +211,11 @@ processJwt jwtCtx headers = do
   -- transform the map of text:aeson-value -> text:text
   metadata <- decodeJSON $ A.Object finalClaims
 
-  -- delete the x-hasura-access-key from this map, and insert x-hasura-role
-  let hasuraMd = Map.insert userRoleHeader (getRoleTxt role) $
-        Map.delete accessKeyHeader metadata
-
-  return $ UserInfo role hasuraMd
+  return $ mkUserInfo role $ mkUserVars $ Map.toList metadata
 
   where
     parseAuthzHeader = do
-      let mAuthzHeader = find (\h -> fst h == CI.mk "Authorization") headers
-      (_, authzHeader) <- maybe missingAuthzHeader return mAuthzHeader
-      let tokenParts = BLC.words $ BL.fromStrict authzHeader
+      let tokenParts = BLC.words authzHeader
       case tokenParts of
         ["Bearer", jwt] -> return jwt
         _               -> malformedAuthzHeader
@@ -235,8 +245,6 @@ processJwt jwtCtx headers = do
 
     malformedAuthzHeader =
       throw400 InvalidHeaders "Malformed Authorization header"
-    missingAuthzHeader =
-      throw400 InvalidHeaders "Missing Authorization header in JWT authentication mode"
     currRoleNotAllowed =
       throw400 AccessDenied "Your current role is not in allowed roles"
     claimsNotFound = do

@@ -1,16 +1,9 @@
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE TypeFamilies          #-}
-
 module Hasura.RQL.DML.Insert where
 
 import           Data.Aeson.Types
 import           Instances.TH.Lift        ()
 
 import qualified Data.Aeson.Text          as AT
-import qualified Data.ByteString.Builder  as BB
 import qualified Data.HashMap.Strict      as HM
 import qualified Data.HashSet             as HS
 import qualified Data.Sequence            as DS
@@ -19,6 +12,7 @@ import qualified Data.Text.Lazy           as LT
 import           Hasura.Prelude
 import           Hasura.RQL.DML.Internal
 import           Hasura.RQL.DML.Returning
+import           Hasura.RQL.GBoolExp
 import           Hasura.RQL.Instances     ()
 import           Hasura.RQL.Types
 import           Hasura.SQL.Types
@@ -33,12 +27,8 @@ data ConflictTarget
 
 data ConflictClauseP1
   = CP1DoNothing !(Maybe ConflictTarget)
-  | CP1Update !ConflictTarget ![PGCol]
+  | CP1Update !ConflictTarget ![PGCol] !S.BoolExp
   deriving (Show, Eq)
-
-isDoNothing :: ConflictClauseP1 -> Bool
-isDoNothing (CP1DoNothing _) = True
-isDoNothing _                = False
 
 data InsertQueryP1
   = InsertQueryP1
@@ -52,17 +42,17 @@ data InsertQueryP1
 
 mkSQLInsert :: InsertQueryP1 -> S.SelectWith
 mkSQLInsert (InsertQueryP1 tn vn cols vals c mutFlds) =
-  mkSelWith tn (S.CTEInsert insert) mutFlds
+  mkSelWith tn (S.CTEInsert insert) mutFlds False
   where
     insert =
       S.SQLInsert vn cols vals (toSQLConflict <$> c) $ Just S.returningStar
 
 toSQLConflict :: ConflictClauseP1 -> S.SQLConflict
 toSQLConflict conflict = case conflict of
-  (CP1DoNothing Nothing)   -> S.DoNothing Nothing
-  (CP1DoNothing (Just ct)) -> S.DoNothing $ Just $ toSQLCT ct
-  (CP1Update ct inpCols)    -> S.Update (toSQLCT ct)
-    (S.buildSEWithExcluded inpCols)
+  CP1DoNothing Nothing          -> S.DoNothing Nothing
+  CP1DoNothing (Just ct)        -> S.DoNothing $ Just $ toSQLCT ct
+  CP1Update ct inpCols filtr    -> S.Update (toSQLCT ct)
+    (S.buildSEWithExcluded inpCols) $ Just $ S.WhereFrag filtr
 
   where
     toSQLCT ct = case ct of
@@ -83,25 +73,41 @@ getInsertDeps (InsertQueryP1 tn _ _ _ _ mutFlds) =
               pgColsFromMutFlds mutFlds
 
 convObj
-  :: (P1C m)
+  :: (UserInfoM m, QErrM m)
   => (PGColType -> Value -> m S.SQLExp)
+  -> HM.HashMap PGCol S.SQLExp
   -> HM.HashMap PGCol S.SQLExp
   -> FieldInfoMap
   -> InsObj
   -> m ([PGCol], [S.SQLExp])
-convObj prepFn defInsVals fieldInfoMap insObj = do
+convObj prepFn defInsVals setInsVals fieldInfoMap insObj = do
   inpInsVals <- flip HM.traverseWithKey insObj $ \c val -> do
     let relWhenPGErr = "relationships can't be inserted"
     colType <- askPGType fieldInfoMap c relWhenPGErr
+    -- if column has predefined value then throw error
+    when (c `elem` preSetCols) $ throwNotInsErr c
     -- Encode aeson's value into prepared value
     withPathK (getPGColTxt c) $ prepFn colType val
-  let sqlExps = HM.elems $ HM.union inpInsVals defInsVals
+  let insVals = HM.union setInsVals inpInsVals
+      sqlExps = HM.elems $ HM.union insVals defInsVals
       inpCols = HM.keys inpInsVals
 
   return (inpCols, sqlExps)
+  where
+    preSetCols = HM.keys setInsVals
+
+    throwNotInsErr c = do
+      role <- userRole <$> askUserInfo
+      throw400 NotSupported $ "column " <> c <<> " is not insertable"
+        <> " for role " <>> role
+
+validateInpCols :: (MonadError QErr m) => [PGCol] -> [PGCol] -> m ()
+validateInpCols inpCols updColsPerm = forM_ inpCols $ \inpCol ->
+  unless (inpCol `elem` updColsPerm) $ throw400 ValidationFailed $
+    "column " <> inpCol <<> " is not updatable"
 
 buildConflictClause
-  :: (P1C m)
+  :: (UserInfoM m, QErrM m)
   => TableInfo
   -> [PGCol]
   -> OnConflict
@@ -119,14 +125,19 @@ buildConflictClause tableInfo inpCols (OnConflict mTCol mTCons act) =
       "Expecting 'constraint' or 'constraint_on' when the 'action' is 'update'"
     (Just col, Nothing, CAUpdate)   -> do
       validateCols col
-      return $ CP1Update (Column $ getPGCols col) inpCols
+      updFiltr <- getUpdFilter
+      return $ CP1Update (Column $ getPGCols col) inpCols $
+        toSQLBool updFiltr
     (Nothing, Just cons, CAUpdate)  -> do
       validateConstraint cons
-      return $ CP1Update (Constraint cons) inpCols
+      updFiltr <- getUpdFilter
+      return $ CP1Update (Constraint cons) inpCols $
+        toSQLBool updFiltr
     (Just _, Just _, _)             -> throw400 UnexpectedPayload
       "'constraint' and 'constraint_on' cannot be set at a time"
   where
     fieldInfoMap = tiFieldInfoMap tableInfo
+    toSQLBool = toSQLBoolExp (S.mkQual $ tiName tableInfo)
 
     validateCols c = do
       let targetcols = getPGCols c
@@ -141,9 +152,16 @@ buildConflictClause tableInfo inpCols (OnConflict mTCol mTCons act) =
                    <<> " for table " <> tiName tableInfo
                    <<> " does not exist"
 
+    getUpdFilter = do
+      upi <- askUpdPermInfo tableInfo
+      let updFiltr = upiFilter upi
+          updCols = HS.toList $ upiCols upi
+      validateInpCols inpCols updCols
+      return updFiltr
+
 
 convInsertQuery
-  :: (P1C m)
+  :: (UserInfoM m, QErrM m, CacheRM m)
   => (Value -> m [InsObj])
   -> (PGColType -> Value -> m S.SQLExp)
   -> InsertQuery
@@ -155,6 +173,10 @@ convInsertQuery objsParser prepFn (InsertQuery tableName val oC mRetCols) = do
   -- Get the current table information
   tableInfo <- askTabInfo tableName
 
+  -- If table is view then check if it is insertable
+  mutableView tableName viIsInsertable
+    (tiViewInfo tableInfo) "insertable"
+
   -- Check if the role has insert permissions
   insPerm   <- askInsPermInfo tableInfo
 
@@ -162,6 +184,7 @@ convInsertQuery objsParser prepFn (InsertQuery tableName val oC mRetCols) = do
   validateHeaders $ ipiRequiredHeaders insPerm
 
   let fieldInfoMap = tiFieldInfoMap tableInfo
+      setInsVals = ipiSet insPerm
 
   -- convert the returning cols into sql returing exp
   mAnnRetCols <- forM mRetCols $ \retCols -> do
@@ -171,21 +194,22 @@ convInsertQuery objsParser prepFn (InsertQuery tableName val oC mRetCols) = do
 
     withPathK "returning" $ checkRetCols fieldInfoMap selPerm retCols
 
-  let mutFlds = mkDefaultMutFlds tableName mAnnRetCols
+  let mutFlds = mkDefaultMutFlds mAnnRetCols
 
   let defInsVals = mkDefValMap fieldInfoMap
       insCols    = HM.keys defInsVals
       insView    = ipiView insPerm
 
   insTuples <- withPathK "objects" $ indexedForM insObjs $ \obj ->
-    convObj prepFn defInsVals fieldInfoMap obj
+    convObj prepFn defInsVals setInsVals fieldInfoMap obj
   let sqlExps = map snd insTuples
       inpCols = HS.toList $ HS.fromList $ concatMap fst insTuples
 
   conflictClause <- withPathK "on_conflict" $ forM oC $ \c -> do
       roleName <- askCurRole
-      unless (ipiAllowUpsert insPerm) $ throw400 PermissionDenied $
-        "upsert is not allowed for role" <>> roleName
+      unless (isTabUpdatable roleName tableInfo) $ throw400 PermissionDenied $
+        "upsert is not allowed for role " <> roleName
+        <<> " since update permissions are not defined"
       buildConflictClause tableInfo inpCols c
 
   return $ InsertQueryP1 tableName insView insCols sqlExps
@@ -196,16 +220,19 @@ convInsertQuery objsParser prepFn (InsertQuery tableName val oC mRetCols) = do
       "; \"returning\" can only be used if the role has "
       <> "\"select\" permission on the table"
 
-decodeInsObjs :: (P1C m) => Value -> m [InsObj]
+decodeInsObjs :: (UserInfoM m, QErrM m) => Value -> m [InsObj]
 decodeInsObjs v = do
   objs <- decodeValue v
   when (null objs) $ throw400 UnexpectedPayload "objects should not be empty"
   return objs
 
-convInsQ :: InsertQuery -> P1 (InsertQueryP1, DS.Seq Q.PrepArg)
-convInsQ insQ =
-  flip runStateT DS.empty $ convInsertQuery
-  (withPathK "objects" . decodeInsObjs) binRHSBuilder insQ
+convInsQ
+  :: (QErrM m, UserInfoM m, CacheRM m)
+  => InsertQuery
+  -> m (InsertQueryP1, DS.Seq Q.PrepArg)
+convInsQ =
+  liftDMLP1 .
+  convInsertQuery (withPathK "objects" . decodeInsObjs) binRHSBuilder
 
 insertP2 :: (InsertQueryP1, DS.Seq Q.PrepArg) -> Q.TxE QErr RespBody
 insertP2 (u, p) =
@@ -215,7 +242,7 @@ insertP2 (u, p) =
     insertSQL = toSQL $ mkSQLInsert u
 
 data ConflictCtx
-  = CCUpdate !ConstraintName ![PGCol]
+  = CCUpdate !ConstraintName ![PGCol] !S.BoolExp
   | CCDoNothing !(Maybe ConstraintName)
   deriving (Show, Eq)
 
@@ -234,9 +261,9 @@ extractConflictCtx cp =
     (CP1DoNothing mConflictTar) -> do
       mConstraintName <- mapM extractConstraintName mConflictTar
       return $ CCDoNothing mConstraintName
-    (CP1Update conflictTar inpCols) -> do
+    (CP1Update conflictTar inpCols filtr) -> do
       constraintName <- extractConstraintName conflictTar
-      return $ CCUpdate constraintName inpCols
+      return $ CCUpdate constraintName inpCols filtr
   where
     extractConstraintName (Constraint cn) = return cn
     extractConstraintName _ = throw400 NotSupported
@@ -246,7 +273,7 @@ setConflictCtx :: Maybe ConflictCtx -> Q.TxE QErr ()
 setConflictCtx conflictCtxM = do
   let t = maybe "null" conflictCtxToJSON conflictCtxM
       setVal = toSQL $ S.SELit t
-      setVar = BB.string7 "SET LOCAL hasura.conflict_clause = "
+      setVar = "SET LOCAL hasura.conflict_clause = "
       q = Q.fromBuilder $ setVar <> setVal
   Q.unitQE defaultTxErrorHandler q () False
   where
@@ -254,18 +281,16 @@ setConflictCtx conflictCtxM = do
 
     conflictCtxToJSON (CCDoNothing constrM) =
         encToText $ InsertTxConflictCtx CAIgnore constrM Nothing
-    conflictCtxToJSON (CCUpdate constr updCols) =
+    conflictCtxToJSON (CCUpdate constr updCols filtr) =
         encToText $ InsertTxConflictCtx CAUpdate (Just constr) $
-        Just $ toSQLTxt $ S.buildSEWithExcluded updCols
+        Just $ toSQLTxt (S.buildSEWithExcluded updCols)
+               <> " " <> toSQLTxt (S.WhereFrag filtr)
 
-instance HDBQuery InsertQuery where
-
-  type Phase1Res InsertQuery = (InsertQueryP1, DS.Seq Q.PrepArg)
-  phaseOne = convInsQ
-
-  phaseTwo _ p1Res = do
-    role <- userRole <$> ask
-    liftTx $
-      bool (nonAdminInsert p1Res) (insertP2 p1Res) $ isAdmin role
-
-  schemaCachePolicy = SCPNoChange
+runInsert
+  :: (QErrM m, UserInfoM m, CacheRWM m, MonadTx m)
+  => InsertQuery
+  -> m RespBody
+runInsert q = do
+  res <- convInsQ q
+  role <- userRole <$> askUserInfo
+  liftTx $ bool (nonAdminInsert res) (insertP2 res) $ isAdmin role

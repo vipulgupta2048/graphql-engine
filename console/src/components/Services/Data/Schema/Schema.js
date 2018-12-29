@@ -15,10 +15,8 @@ import {
   addAllUntrackedTablesSql,
 } from '../Add/AddExistingTableViewActions';
 import {
-  loadSchema,
-  loadUntrackedSchema,
   loadUntrackedRelations,
-  fetchSchemaList,
+  fetchDataInit,
   LOAD_UNTRACKED_RELATIONS,
   UPDATE_CURRENT_SCHEMA,
 } from '../DataActions';
@@ -36,9 +34,7 @@ class Schema extends Component {
     };
     // Initialize this table
     const dispatch = this.props.dispatch;
-    dispatch(fetchSchemaList());
-    dispatch(loadSchema());
-    dispatch(loadUntrackedSchema());
+    dispatch(fetchDataInit());
     const untrackedRelations = getAllUnTrackedRelations(
       this.props.schema,
       this.props.currentSchema
@@ -73,11 +69,10 @@ class Schema extends Component {
 
     const handleSchemaChange = e => {
       const updatedSchema = e.target.value;
-      dispatch(push('/data/schema/' + updatedSchema));
+      dispatch(push(`${appPrefix}/schema/${updatedSchema}`));
       Promise.all([
         dispatch({ type: UPDATE_CURRENT_SCHEMA, currentSchema: updatedSchema }),
-        dispatch(loadSchema()),
-        dispatch(loadUntrackedSchema()),
+        dispatch(fetchDataInit()),
         dispatch(loadUntrackedRelations()),
       ]);
     };

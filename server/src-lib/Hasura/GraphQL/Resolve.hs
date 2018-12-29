@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Hasura.GraphQL.Resolve
   ( resolveSelSet
   ) where
@@ -14,6 +9,7 @@ import qualified Data.ByteString.Lazy                   as BL
 import qualified Data.HashMap.Strict                    as Map
 import qualified Database.PG.Query                      as Q
 import qualified Language.GraphQL.Draft.Syntax          as G
+
 
 import           Hasura.GraphQL.Resolve.Context
 import           Hasura.GraphQL.Resolve.Introspect
@@ -39,6 +35,8 @@ buildTx userInfo gCtx fld = do
     OCSelectPkey tn permFilter hdrs ->
       validateHdrs hdrs >> RS.convertSelectByPKey tn permFilter fld
       -- RS.convertSelect tn permFilter fld
+    OCSelectAgg tn permFilter permLimit hdrs ->
+      validateHdrs hdrs >> RS.convertAggSelect tn permFilter permLimit fld
     OCInsert tn hdrs    ->
       validateHdrs hdrs >> RI.convertInsert roleName tn fld
       -- RM.convertInsert (tn, vn) cols fld
@@ -52,7 +50,7 @@ buildTx userInfo gCtx fld = do
     roleName = userRole userInfo
     opCtxMap = _gOpCtxMap gCtx
     fldMap = _gFields gCtx
-    orderByCtx = _gOrdByEnums gCtx
+    orderByCtx = _gOrdByCtx gCtx
     insCtxMap = _gInsCtxMap gCtx
 
     getOpCtx f =
@@ -60,23 +58,24 @@ buildTx userInfo gCtx fld = do
       "lookup failed: opctx: " <> showName f
 
     validateHdrs hdrs = do
-      let receivedHdrs = userHeaders userInfo
+      let receivedVars = userVars userInfo
       forM_ hdrs $ \hdr ->
-        unless (Map.member hdr receivedHdrs) $
+        unless (isJust $ getVarVal hdr receivedVars) $
         throw400 NotFound $ hdr <<> " header is expected but not found"
 
 -- {-# SCC resolveFld #-}
 resolveFld
-  :: UserInfo -> GCtx
+  :: (MonadTx m)
+  => UserInfo -> GCtx
   -> G.OperationType
   -> Field
-  -> Q.TxE QErr BL.ByteString
+  -> m BL.ByteString
 resolveFld userInfo gCtx opTy fld =
   case _fName fld of
     "__type"     -> J.encode <$> runReaderT (typeR fld) gCtx
     "__schema"   -> J.encode <$> runReaderT (schemaR fld) gCtx
     "__typename" -> return $ J.encode $ mkRootTypeName opTy
-    _            -> buildTx userInfo gCtx fld
+    _            -> liftTx $ buildTx userInfo gCtx fld
   where
     mkRootTypeName :: G.OperationType -> Text
     mkRootTypeName = \case
@@ -85,10 +84,11 @@ resolveFld userInfo gCtx opTy fld =
       G.OperationTypeSubscription -> "subscription_root"
 
 resolveSelSet
-  :: UserInfo -> GCtx
+  :: (MonadTx m)
+  => UserInfo -> GCtx
   -> G.OperationType
   -> SelSet
-  -> Q.TxE QErr BL.ByteString
+  -> m BL.ByteString
 resolveSelSet userInfo gCtx opTy fields =
   fmap mkJSONObj $ forM (toList fields) $ \fld -> do
     fldResp <- resolveFld userInfo gCtx opTy fld

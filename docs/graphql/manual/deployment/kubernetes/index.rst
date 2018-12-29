@@ -1,6 +1,11 @@
 Run Hasura GraphQL Engine on Kubernetes
 =======================================
 
+.. contents:: Table of contents
+  :backlinks: none
+  :depth: 1
+  :local:
+
 This guide assumes that you already have Postgres running and helps you set up the Hasura GraphQL engine on Kubernetes
 and connect it to your Postgres database.
 
@@ -44,13 +49,13 @@ Step 3: Create the Kubernetes deployment and service
   $ kubectl create -f deployment.yaml
   $ kubectl create -f svc.yaml
 
-Step 4: Open the hasura console
+Step 4: Open the Hasura console
 -------------------------------
 
 The above creates a LoadBalancer type service with port 80. So you should be able to access the console at the
 external IP.
 
-For example, using docker-for-desktop on mac:
+For example, using Docker-for-desktop on Mac:
 
 .. code-block:: bash
 
@@ -64,15 +69,13 @@ Head to: http://localhost and the console should load!
 Step 5: Track existing tables and relationships
 -----------------------------------------------
 
-On the console page, you'll see your existing tables/views as "Untracked tables/views" in the console. Click the
-``Add all`` button to enable GraphQL APIs over them.
+See :doc:`../../schema/using-existing-database` to enable GraphQL over the database.
 
-.. image:: ../../../../img/graphql/manual/getting-started/TrackTable.jpg
-
-Advanced:
----------
+Advanced
+--------
 
 - :doc:`Securing your GraphQL endpoint <securing-graphql-endpoint>`
+- :doc:`GraphQL engine server logs <logging>`
 - :doc:`Updating GraphQL engine <updating>`
 - :doc:`Setting up migrations <../../migrations/index>`
 
@@ -81,4 +84,5 @@ Advanced:
    :hidden:
 
    Securing your GraphQL endpoint <securing-graphql-endpoint>
+   GraphQL engine server logs <logging>
    Updating GraphQL engine <updating>

@@ -1,7 +1,7 @@
 # Contributing
 
-This guide is for setting-up the graphql-engine server for development on your
-own machine, and how to contribute.
+This guide explains how to set up the graphql-engine server for development on your
+own machine and how to contribute.
 
 ## Pre-requisites
 
@@ -22,7 +22,7 @@ own machine, and how to contribute.
 ### Run
 - Make sure postgres is running
 - Create a database on postgres
-- Run the binary: `stack exec graphql-engine -- --database-url=<database-url>`
+- Run the binary: `stack exec graphql-engine -- --database-url=<database-url> serve`
 
 ### Work
 - Work on the feature/fix

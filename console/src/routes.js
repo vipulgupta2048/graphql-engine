@@ -23,6 +23,8 @@ import globals from './Globals';
 
 import validateLogin from './components/Common/validateLogin';
 
+import { getCustomResolverRouter } from './components/Services/CustomResolver';
+
 const routes = store => {
   // load hasuractl migration status
   const requireMigrationStatus = (nextState, replaceState, cb) => {
@@ -33,7 +35,13 @@ const routes = store => {
         },
         r => {
           if (r.code === 'data_api_error') {
-            alert('Hasura CLI: ' + r.message);
+            if (globals.accessKey) {
+              alert('Hasura CLI: ' + r.message);
+            } else {
+              alert(
+                'Looks like CLI is not configured with the access key. Please configure and try again'
+              );
+            }
           } else {
             alert(
               'Not able to reach the graphql server. Check if hasura console server is running or if graphql server is running and try again'
@@ -54,6 +62,11 @@ const routes = store => {
   const makeDataRouter = dataRouterUtils.makeDataRouter;
   const makeEventRouter = eventRouterUtils.makeEventRouter;
 
+  const customResolverRouter = getCustomResolverRouter(
+    connect,
+    store,
+    composeOnEnterHooks
+  );
   return (
     <Route path="/" component={App} onEnter={validateLogin(store)}>
       <Route path="login" component={generatedLoginConnector(connect)} />
@@ -71,6 +84,7 @@ const routes = store => {
           <Route path="metadata" component={metadataConnector(connect)} />
           {makeDataRouter}
           {makeEventRouter}
+          {customResolverRouter}
         </Route>
       </Route>
       <Route path="404" component={PageNotFound} status="404" />

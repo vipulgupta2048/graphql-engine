@@ -2,10 +2,11 @@ import React from 'react';
 import { Subscription } from 'react-apollo';
 import gql from 'graphql-tag';
 import ChatWrapper from './ChatWrapper';
+import '../App.css';
 
 const subscribeToNewMessages = gql`
   subscription {
-    message ( order_by: id_desc limit: 1) {
+    message ( order_by: {id:desc} limit: 1) {
       id
       username
       text
@@ -60,7 +61,7 @@ class Chat extends React.Component {
           }
         });
       },
-      3000 
+      3000
     );
   }
 
@@ -95,6 +96,24 @@ class Chat extends React.Component {
           userId={this.props.userId}
           username={username}
         />
+        <footer className="App-footer">
+          <div className="hasura-logo">
+            <img src="https://graphql-engine-cdn.hasura.io/img/powered_by_hasura_black.svg" onClick={() => window.open("https://hasura.io")} alt="Powered by Hasura"/>
+            &nbsp; | &nbsp;
+            <a href="/console" target="_blank" rel="noopener noreferrer">
+              Backend
+            </a>
+            &nbsp; | &nbsp;
+            <a href="https://github.com/hasura/graphql-engine/tree/master/community/examples/realtime-chat" target="_blank" rel="noopener noreferrer">
+              Source
+            </a>
+            &nbsp; | &nbsp;
+            <a href="https://blog.hasura.io/building-a-realtime-chat-app-with-graphql-subscriptions-d68cd33e73f" target="_blank" rel="noopener noreferrer">
+              Blogpost
+            </a>
+          </div>
+          <div className="footer-small-text"><span>(The database resets every 24 hours)</span></div>
+        </footer>
       </div>
     );
   }

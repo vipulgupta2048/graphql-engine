@@ -1,6 +1,11 @@
 Schema/Metadata API Reference: Permissions
 ==========================================
 
+.. contents:: Table of contents
+  :backlinks: none
+  :depth: 1
+  :local:
+
 The permission layer is designed to restrict the operations that can be
 performed by various users. Permissions can be defined on various operations
 (insert/select/update/delete) at a role level granularity. By default, the ``admin``
@@ -99,11 +104,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
    * - permission
      - true
@@ -128,7 +133,7 @@ Args syntax
      - Description
    * - check
      - true
-     - :ref:`BoolExp <BoolExp>`
+     - :ref:`BoolExp`
      - This expression has to hold true for every new row that is inserted
 
 .. _drop_insert_permission:
@@ -152,11 +157,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
 
 .. _create_select_permission:
@@ -213,11 +218,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
    * - permission
      - true
@@ -242,11 +247,11 @@ Args syntax
      - Description
    * - columns
      - true
-     - :ref:`PGColumn <PGColumn>` array (or) ``'*'``
+     - :ref:`PGColumn` array (or) ``'*'``
      - Only these columns are selectable (or all when ``'*'`` is specified)
    * - filter
      - true
-     - :ref:`BoolExp <BoolExp>`
+     - :ref:`BoolExp`
      - Only the rows where this expression holds true are selectable
 
 .. _drop_select_permission:
@@ -270,11 +275,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
 
 .. _create_update_permission:
@@ -335,11 +340,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
    * - permission
      - true
@@ -364,11 +369,11 @@ Args syntax
      - Description
    * - columns
      - true
-     - :ref:`PGColumn <PGColumn>` array
+     - :ref:`PGColumn` array
      - Only these columns are updatable
    * - filter
      - true
-     - :ref:`BoolExp <BoolExp>`
+     - :ref:`BoolExp`
      - Only the rows where this expression holds true are deletable
 
 .. _drop_update_permission:
@@ -392,11 +397,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
 
 .. _create_delete_permission:
@@ -446,11 +451,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
    * - permission
      - true
@@ -475,7 +480,7 @@ Args syntax
      - Description
    * - filter
      - true
-     - :ref:`BoolExp <BoolExp>`
+     - :ref:`BoolExp`
      - Only the rows where this expression holds true are deletable
 
 .. _drop_delete_permission:
@@ -499,11 +504,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - Role
 
 .. _set_permission_comment:
@@ -547,11 +552,11 @@ Args syntax
      - Description
    * - table
      - true
-     - :ref:`TableName <TableName>`
+     - :ref:`TableName`
      - Name of the table
    * - role
      - true
-     - :ref:`RoleName <RoleName>`
+     - :ref:`RoleName`
      - The role in the permission
    * - type
      - true
